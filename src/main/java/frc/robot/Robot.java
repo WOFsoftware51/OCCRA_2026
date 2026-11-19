@@ -68,8 +68,8 @@ public class Robot extends TimedRobot {
   // Auto timing
   private final Timer driveTimer = new Timer();
   private boolean driving = false;
-  private static final double kAutoSpinUpSeconds = 1.5;
-  private static final double kAutoFeedSeconds = 1.0;
+  private static final double kAutoSpinUpSeconds = 0.5;
+  private static final double kAutoFeedSeconds = 0.0;
   private static final double kAutoDriveSeconds = 0.5;
   private static final double kAutoDriveSpeed = 0.3;
 
@@ -145,12 +145,12 @@ public class Robot extends TimedRobot {
 
   @Override
   public void autonomousPeriodic() {
-    double t = autoTimer.get();
-    double feedEnd = kAutoSpinUpSeconds + kAutoFeedSeconds;
-    double driveEnd = feedEnd + kAutoDriveSeconds;
+    // double t = autoTimer.get();
+    // double feedEnd = kAutoSpinUpSeconds + kAutoFeedSeconds;
+    // double driveEnd = feedEnd + kAutoDriveSeconds;
     boolean shootTwo = false;
     boolean intaking = false;
-
+    double driveTarget = -5;
 
         // if(shootTwo = false){
         //   shootTwo = true;
@@ -178,35 +178,51 @@ public class Robot extends TimedRobot {
         //   leftLeader.set(0.0);
         //   rightLeader.set(0.0);
         // }
-        if(shootTwo = false){
-          shootTwo = true;
-          intake.set(0);
+        // if(shootTwo = false){
+        //   shootTwo = true;
+        //   intake.set(0);
+        //   setTransfer(false);
+        //   leftLeader.set(0);
+        //   rightLeader.set(0);
+        // }else if (shootTwo = true){
+        //   shootTwo = true;
+        //   intake.set(0);
+        //   setTransfer(true);
+        //   leftLeader.set(0);
+        //   rightLeader.set(0);
+        // }else if(leftLeader.getPosition().getValueAsDouble()<12 && rightLeader.getPosition().getValueAsDouble()<12){
+        //   leftLeader.set(0.1);
+        //   rightLeader.set(0.1);
+        //   shootTwo = true;
+        //   intake.set(0.4);
+        //   setTransfer(true);
+        // }else if(leftLeader.getPosition().getValueAsDouble()>12 && rightLeader.getPosition().getValueAsDouble()>12){
+        //   leftLeader.set(0.0);
+        //   rightLeader.set(0.0);
+        //   intake.set(0.4);
+        //   shootTwo = true;
+        // }else{
+        //   shootTwo = false;
+        //   intake.set(0);
+        //   setTransfer(false);
+        //   leftLeader.set(0);
+        //   rightLeader.set(0);
+        // }
+         if (driveTarget < leftLeader.getPosition().getValueAsDouble()) {
+          shootTwo = false;
           setTransfer(false);
-          leftLeader.set(0);
-          rightLeader.set(0);
-        }else if (shootTwo = true){
+          leftLeader.set(-0.1);
+          rightLeader.set(-0.1);
+        }else if (driveTarget > leftLeader.getPosition().getValueAsDouble()) {
           shootTwo = true;
-          intake.set(0);
           setTransfer(true);
           leftLeader.set(0);
           rightLeader.set(0);
-        }else if(leftLeader.getPosition().getValueAsDouble()<12 && rightLeader.getPosition().getValueAsDouble()<12){
-          leftLeader.set(0.1);
-          rightLeader.set(0.1);
-          shootTwo = true;
-          intake.set(0.4);
-          setTransfer(true);
-        }else if(leftLeader.getPosition().getValueAsDouble()>12 && rightLeader.getPosition().getValueAsDouble()>12){
+        } else {
+          shootTwo = false;
+          setTransfer(false);
           leftLeader.set(0.0);
           rightLeader.set(0.0);
-          intake.set(0.4);
-          shootTwo = true;
-        }else{
-          shootTwo = false;
-          intake.set(0);
-          setTransfer(false);
-          leftLeader.set(0);
-          rightLeader.set(0);
         }
         // if (t < kAutoSpinUpSeconds) {
         //   shootTwo = true;
@@ -271,7 +287,6 @@ public class Robot extends TimedRobot {
         //   intaking = false;
         // }
     
-      
       }
     
      
