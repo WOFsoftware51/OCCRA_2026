@@ -67,6 +67,9 @@ public class Robot extends TimedRobot {
 
   // Auto timing
   private final Timer driveTimer = new Timer();
+  private enum AutoStep { DRIVE_BACK, SHOOT, DRIVE_AND_INTAKE, DONE, DRIVE_BACK2, SHOOT2 }
+  private AutoStep autoStep = AutoStep.DRIVE_BACK;
+  private final Timer stepTimer = new Timer();
   private boolean driving = false;
   private static final double kAutoSpinUpSeconds = 0.5;
   private static final double kAutoFeedSeconds = 0.0;
@@ -141,6 +144,7 @@ public class Robot extends TimedRobot {
   @Override
   public void autonomousInit() {
     autoTimer.restart();
+    nextStep(AutoStep.DRIVE_BACK);
   }
 
   @Override
@@ -150,101 +154,105 @@ public class Robot extends TimedRobot {
     // double driveEnd = feedEnd + kAutoDriveSeconds;
     boolean shootTwo = false;
     boolean intaking = false;
-    double driveTarget = -5;
+    boolean transfering = false;
+    double driveTarget = -15;
+    double intakeDriveTarget = 30;
+    double drivePos = leftLeader.getPosition().getValueAsDouble();
+    switch (autoStep) {
+      case DRIVE_BACK:
+        leftLeader.set(-0.1);
+        rightLeader.set(-0.1);
+        intake.set(0.0);
+        setTransfer(false);
+        if (drivePos <= driveTarget) {          // reached the target, go to next step
+          stopDrive();
+          nextStep(AutoStep.SHOOT);
+        }
+        break;
 
-        // if(shootTwo = false){
-        //   shootTwo = true;
-        //   setTransfer(true);
-        //   intake.set(0);
-        //   leftLeader.set(0);
-        //   rightLeader.set(0);
-        // }else if(shootTwo = true){
-        //   shootTwo = true;
-        //   setTransfer(true);
-        //   intake.set(0.4);
-        //   leftLeader.set(0);
-        //   rightLeader.set(0);
-        // }else if(intake.getPosition().getValueAsDouble()>50){
-        //   shootTwo = true;
-        //   setTransfer(true);
-        //   intake.set(0.4);
-        //   leftLeader.set(0.2);
-        //   rightLeader.set(0.2);
-        // }else{
+      case SHOOT:
+        stopDrive();
+       shootTwo = true;
+        setTransfer(true);
+        if (stepTimer.get() > 1.5) {       // shoot for 1.5 s, then move on
+          shootTwo = true;
+          setTransfer(false);
+          nextStep(AutoStep.DRIVE_AND_INTAKE);
+        }
+        break;
+
+      case DRIVE_AND_INTAKE:
+        leftLeader.set(0.1);
+        rightLeader.set(0.1);
+        intake.set(0.4);
+        transferBottom.set(-1.0);
+        if (drivePos >= intakeDriveTarget) {
+          stopDrive();
+          intake.set(0.0);
+          transferBottom.set(0.0);
+          nextStep(AutoStep.DONE);
+        }
+        break;
+
+      case DONE:
+      default:
+        stopDrive();
+        intake.set(0.0);
+        shootTwo = true;
+        setTransfer(false);
+        break;
+    }
+  
+       
+        //  if (driveTarget < leftLeader.getPosition().getValueAsDouble()) {
         //   shootTwo = false;
         //   setTransfer(false);
+        //   leftLeader.set(-0.1);
+        //   rightLeader.set(-0.1);
         //   intake.set(0.0);
-        //   leftLeader.set(0);
-        //   leftLeader.set(0.0);
-        //   rightLeader.set(0.0);
-        // }
-        // if(shootTwo = false){
+        // }else if (driveTarget == leftLeader.getPosition().getValueAsDouble()) {
         //   shootTwo = true;
-        //   intake.set(0);
-        //   setTransfer(false);
-        //   leftLeader.set(0);
-        //   rightLeader.set(0);
-        // }else if (shootTwo = true){
-        //   shootTwo = true;
-        //   intake.set(0);
         //   setTransfer(true);
         //   leftLeader.set(0);
         //   rightLeader.set(0);
-        // }else if(leftLeader.getPosition().getValueAsDouble()<12 && rightLeader.getPosition().getValueAsDouble()<12){
+        //   intake.set(0.0);
+        // }else {
+        //   shootTwo = false;
+        //   setTransfer(false);
+        //   leftLeader.set(0.0);
+        //   rightLeader.set(0.0);
+        //   intake.set(0.0);
+        // }
+
+        //  if (!transfering && !shootTwo){
+        //   shootTwo = false;
+        //   setTransfer(false);
         //   leftLeader.set(0.1);
         //   rightLeader.set(0.1);
-        //   shootTwo = true;
         //   intake.set(0.4);
-        //   setTransfer(true);
-        // }else if(leftLeader.getPosition().getValueAsDouble()>12 && rightLeader.getPosition().getValueAsDouble()>12){
-        //   leftLeader.set(0.0);
-        //   rightLeader.set(0.0);
-        //   intake.set(0.4);
-        //   shootTwo = true;
-        // }else{
+        //   transferBottom.set(-1.0);
+        // }if (intakeDriveTarget > leftLeader.getPosition().getValueAsDouble()){
         //   shootTwo = false;
-        //   intake.set(0);
         //   setTransfer(false);
+        //   leftLeader.set(-0.1);
+        //   rightLeader.set(-0.1);
+        //   intake.set(0.0);
+        //   transferBottom.set(0.0);
+        //   transferTop.set(0.0);
+        // }else if(driveTarget > leftLeader.getPosition().getValueAsDouble()) {
+        //   shootTwo = true;
+        //   setTransfer(true);
         //   leftLeader.set(0);
         //   rightLeader.set(0);
-        // }
-         if (driveTarget < leftLeader.getPosition().getValueAsDouble()) {
-          shootTwo = false;
-          setTransfer(false);
-          leftLeader.set(-0.1);
-          rightLeader.set(-0.1);
-        }else if (driveTarget > leftLeader.getPosition().getValueAsDouble()) {
-          shootTwo = true;
-          setTransfer(true);
-          leftLeader.set(0);
-          rightLeader.set(0);
-        } else {
-          shootTwo = false;
-          setTransfer(false);
-          leftLeader.set(0.0);
-          rightLeader.set(0.0);
-        }
-        // if (t < kAutoSpinUpSeconds) {
-        //   shootTwo = true;
-        //   setTransfer(false);
-        //   leftOut.Output = 0.0;
-        //   rightOut.Output = 0.0;
-        // } else if (t < feedEnd) {
-        //   shootTwo = true;
-        //   setTransfer(true);
-        //   leftOut.Output = 0.0;
-        //   rightOut.Output = 0.0;
-        // } else if (t < driveEnd) {
-        //   // Drive forward for 2 seconds
+        //   intake.set(1.0);
+        //   transferBottom.set(-0.5);
+        //   transferTop.set(-0.5);
+        // }else {
         //   shootTwo = false;
         //   setTransfer(false);
-        //   leftFollower.set(0.3);
-        //   rightFollower.set(0.3);
-        // } else {
-        //   shootTwo = false;
-        //   setTransfer(false);
-        //   leftFollower.set(0.0);
-        //   rightFollower.set(0.0);
+        //   leftLeader.set(0.0);
+        //   rightLeader.set(0.0);
+        //   intake.set(0.0);
         // }
       
         if(shooterTop.getVelocity().getValueAsDouble()*60.0 < kTopSpeed-300)
@@ -273,19 +281,6 @@ public class Robot extends TimedRobot {
         {
           shooterBottom.setControl(bottomRequest.withOutput(0));
         }
-    
-        // if(leftLeader.getPosition().getValueAsDouble()<12){//22
-        //   leftLeader.set(0.1);
-        // } else{
-        //   leftLeader.set(0);
-        //   intaking = false;
-        // }
-        // if(rightLeader.getPosition().getValueAsDouble()<12){ //18
-        //   rightLeader.set(0.1);
-        // } else{
-        //   rightLeader.set(0);
-        //   intaking = false;
-        // }
     
       }
     
@@ -324,6 +319,15 @@ public class Robot extends TimedRobot {
     transferTop.setControl(transferTopRequest.withOutput(on ? kTransferTopSpeed : 0));
   }
 
+   private void nextStep(AutoStep next) {
+    autoStep = next;
+    stepTimer.restart();
+  }
+
+  private void stopDrive() {
+    leftLeader.set(0);
+    rightLeader.set(0);
+  } 
   @Override
   public void teleopPeriodic() {
     /* Get forward and rotational throttle from driver */
