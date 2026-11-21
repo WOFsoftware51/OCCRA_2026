@@ -144,6 +144,9 @@ public class Robot extends TimedRobot {
   @Override
   public void autonomousInit() {
     autoTimer.restart();
+    // Zero the drive encoders so the drive targets are measured from where auto starts.
+    leftLeader.setPosition(0);
+    rightLeader.setPosition(0);
     nextStep(AutoStep.DRIVE_BACK);
   }
 
@@ -172,10 +175,18 @@ public class Robot extends TimedRobot {
 
       case SHOOT:
         stopDrive();
-       shootTwo = true;
-        setTransfer(true);
-        if (stepTimer.get() > 1.5) {       // shoot for 1.5 s, then move on
-          shootTwo = true;
+        shootTwo = true;
+        // Wait (up to 2 s) for the shooter to reach speed before feeding.
+        if (shooterAtSpeed() || stepTimer.get() > 2.0) {
+          // Feed the same way teleop does: intake + both transfers.
+          intake.set(kIntakeSpeed);
+          setTransfer(true);
+        } else {
+          intake.set(0.0);
+          setTransfer(false);
+        }
+        if (stepTimer.get() > 3.5) {       // give it time to spin up and shoot, then move on
+          intake.set(0.0);
           setTransfer(false);
           nextStep(AutoStep.DRIVE_AND_INTAKE);
         }
@@ -322,6 +333,11 @@ public class Robot extends TimedRobot {
    private void nextStep(AutoStep next) {
     autoStep = next;
     stepTimer.restart();
+  }
+
+  private boolean shooterAtSpeed() {
+    return shooterTop.getVelocity().getValueAsDouble() * 60.0 > kTopSpeed - 100
+        && shooterBottom.getVelocity().getValueAsDouble() * 60.0 > kBottomSpeed - 100;
   }
 
   private void stopDrive() {
