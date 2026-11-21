@@ -12,6 +12,7 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.MotorAlignmentValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.fasterxml.jackson.databind.ser.std.StdKeySerializers.Default;
 
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.TimedRobot;
@@ -19,8 +20,8 @@ import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.XboxController;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
-
-import java.util.List;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 
 /**
  * The VM is configured to automatically run this class, and to call the
@@ -64,47 +65,18 @@ public class Robot extends TimedRobot {
   private final DutyCycleOut transferTopRequest = new DutyCycleOut(0);
   private final DutyCycleOut spitRequest = new DutyCycleOut(0);
 
-  // ---------------------------------------------------------------------------
-  // Autonomous
-  // ---------------------------------------------------------------------------
-  // Drive distances are in drive-motor rotations (what leftLeader.getPosition()
-  // reports). Measure on the field and tune these.
-  private static final double kAutoSpinUpTimeout = 2.0; // max seconds to wait for shooter speed
-  private static final double kAutoFeedSeconds = 1.0; // seconds to run the feed per shot
-  private static final double kAutoDriveSpeed = 0.2; // duty cycle while driving
-  private static final double kAutoTaxiRotations = 12.0; // distance to leave the start zone
-  private static final double kAutoPickupRotations = 12.0; // distance to the second ball
-  private static final double kAutoDriveTimeout = 4.0; // safety stop for any drive step
-
-  /** The routines selectable from the dashboard ("Auto Routine" chooser). */
-  private enum AutoRoutine {
-    DO_NOTHING,
-    DRIVE_FORWARD,
-    SHOOT_PRELOAD,
-    SHOOT_THEN_DRIVE,
-    TWO_BALL
-  }
-
-  /**
-   * One step of an auto routine. Called every loop with the seconds since the
-   * step started; return true when the step is finished.
-   */
-  @FunctionalInterface
-  private interface AutoStep {
-    boolean run(double stepTime);
-  }
-
-  private final SendableChooser<AutoRoutine> autoChooser = new SendableChooser<>();
+  // Auto timing
+  private final Timer driveTimer = new Timer();
+  private enum AutoStep { DRIVE_BACK, SHOOT, DRIVE_AND_INTAKE, DONE, DRIVE_BACK2, SHOOT2 }
+  private AutoStep autoStep = AutoStep.DRIVE_BACK;
   private final Timer stepTimer = new Timer();
-  private List<AutoStep> autoSteps = List.of();
-  private int autoStepIndex = 0;
+  private boolean driving = false;
+  private static final double kAutoSpinUpSeconds = 0.5;
+  private static final double kAutoFeedSeconds = 0.0;
+  private static final double kAutoDriveSeconds = 0.5;
+  private static final double kAutoDriveSpeed = 0.3;
 
-  // Outputs requested by the current auto step; applied once per loop.
-  private double autoLeft = 0;
-  private double autoRight = 0;
-  private boolean autoShooter = false;
-  private boolean autoIntake = false; // intake + bottom transfer (hold ball)
-  private boolean autoFeed = false; // intake + both transfers (shoot ball)
+  private final Timer autoTimer = new Timer();
 
   /**
    * This function is run when the robot is first started up and should be used
@@ -155,13 +127,6 @@ public class Robot extends TimedRobot {
     leftLeader.setSafetyEnabled(true);
     rightLeader.setSafetyEnabled(true);
     //not mine
-
-    autoChooser.setDefaultOption("Shoot preload", AutoRoutine.SHOOT_PRELOAD);
-    autoChooser.addOption("Do nothing", AutoRoutine.DO_NOTHING);
-    autoChooser.addOption("Drive forward", AutoRoutine.DRIVE_FORWARD);
-    autoChooser.addOption("Shoot then drive", AutoRoutine.SHOOT_THEN_DRIVE);
-    autoChooser.addOption("Two ball", AutoRoutine.TWO_BALL);
-    SmartDashboard.putData("Auto Routine", autoChooser);
   }
 
   @Override
@@ -178,167 +143,161 @@ public class Robot extends TimedRobot {
 
   @Override
   public void autonomousInit() {
+    autoTimer.restart();
+    // Zero the drive encoders so the drive targets are measured from where auto starts.
     leftLeader.setPosition(0);
     rightLeader.setPosition(0);
-
-    AutoRoutine routine = autoChooser.getSelected();
-    autoSteps = buildRoutine(routine == null ? AutoRoutine.DO_NOTHING : routine);
-    autoStepIndex = 0;
-    stepTimer.restart();
-    SmartDashboard.putString("Auto Selected", String.valueOf(routine));
+    nextStep(AutoStep.DRIVE_BACK);
   }
 
   @Override
   public void autonomousPeriodic() {
-    // Everything defaults to off; the active step turns on what it needs.
-    autoLeft = 0;
-    autoRight = 0;
-    autoShooter = false;
-    autoIntake = false;
-    autoFeed = false;
+    // double t = autoTimer.get();
+    // double feedEnd = kAutoSpinUpSeconds + kAutoFeedSeconds;
+    // double driveEnd = feedEnd + kAutoDriveSeconds;
+    boolean shootTwo = false;
+    boolean intaking = false;
+    boolean transfering = false;
+    double driveTarget = -15;
+    double intakeDriveTarget = 30;
+    double drivePos = leftLeader.getPosition().getValueAsDouble();
+    switch (autoStep) {
+      case DRIVE_BACK:
+        leftLeader.set(-0.1);
+        rightLeader.set(-0.1);
+        intake.set(0.0);
+        setTransfer(false);
+        if (drivePos <= driveTarget) {          // reached the target, go to next step
+          stopDrive();
+          nextStep(AutoStep.SHOOT);
+        }
+        break;
 
-    if (autoStepIndex < autoSteps.size()) {
-      boolean done = autoSteps.get(autoStepIndex).run(stepTimer.get());
-      if (done) {
-        autoStepIndex++;
-        stepTimer.restart();
-      }
-    }
+      case SHOOT:
+        stopDrive();
+        shootTwo = true;
+        // Wait (up to 2 s) for the shooter to reach speed before feeding.
+        if (shooterAtSpeed() || stepTimer.get() > 2.0) {
+          // Feed the same way teleop does: intake + both transfers.
+          intake.set(kIntakeSpeed);
+          setTransfer(true);
+        } else {
+          intake.set(0.0);
+          setTransfer(false);
+        }
+        if (stepTimer.get() > 3.5) {       // give it time to spin up and shoot, then move on
+          intake.set(0.0);
+          setTransfer(false);
+          nextStep(AutoStep.DRIVE_AND_INTAKE);
+        }
+        break;
 
-    applyAutoOutputs();
-    SmartDashboard.putNumber("Auto Step", autoStepIndex);
-  }
+      case DRIVE_AND_INTAKE:
+        leftLeader.set(0.1);
+        rightLeader.set(0.1);
+        intake.set(0.4);
+        transferBottom.set(-1.0);
+        if (drivePos >= intakeDriveTarget) {
+          stopDrive();
+          intake.set(0.0);
+          transferBottom.set(0.0);
+          nextStep(AutoStep.DONE);
+        }
+        break;
 
-  private List<AutoStep> buildRoutine(AutoRoutine routine) {
-    switch (routine) {
-      case DRIVE_FORWARD:
-        return List.of(
-            driveTo(kAutoTaxiRotations, false, false));
-      case SHOOT_PRELOAD:
-        return List.of(
-            spinUp(),
-            feed());
-      case SHOOT_THEN_DRIVE:
-        return List.of(
-            spinUp(),
-            feed(),
-            driveTo(kAutoTaxiRotations, false, false));
-      case TWO_BALL:
-        return List.of(
-            spinUp(),
-            feed(),
-            driveTo(kAutoPickupRotations, true, false), // drive out intaking
-            driveTo(0, true, true), // come back, spin shooter up on the way
-            spinUp(),
-            feed());
-      case DO_NOTHING:
+      case DONE:
       default:
-        return List.of();
+        stopDrive();
+        intake.set(0.0);
+        shootTwo = true;
+        setTransfer(false);
+        break;
     }
-  }
+  
+       
+        //  if (driveTarget < leftLeader.getPosition().getValueAsDouble()) {
+        //   shootTwo = false;
+        //   setTransfer(false);
+        //   leftLeader.set(-0.1);
+        //   rightLeader.set(-0.1);
+        //   intake.set(0.0);
+        // }else if (driveTarget == leftLeader.getPosition().getValueAsDouble()) {
+        //   shootTwo = true;
+        //   setTransfer(true);
+        //   leftLeader.set(0);
+        //   rightLeader.set(0);
+        //   intake.set(0.0);
+        // }else {
+        //   shootTwo = false;
+        //   setTransfer(false);
+        //   leftLeader.set(0.0);
+        //   rightLeader.set(0.0);
+        //   intake.set(0.0);
+        // }
 
-  // ----- Auto step builders -----
-
-  /** Spin the shooter until it is at speed (or the timeout passes). */
-  private AutoStep spinUp() {
-    return t -> {
-      autoShooter = true;
-      return shooterAtSpeed() || t >= kAutoSpinUpTimeout;
-    };
-  }
-
-  /** Keep the shooter spinning and feed balls into it for kAutoFeedSeconds. */
-  private AutoStep feed() {
-    return t -> {
-      autoShooter = true;
-      autoFeed = true;
-      return t >= kAutoFeedSeconds;
-    };
-  }
-
-  /**
-   * Drive straight until the average drive position reaches targetRotations
-   * (measured from where auto started), or kAutoDriveTimeout passes.
-   */
-  private AutoStep driveTo(double targetRotations, boolean intaking, boolean shooterOn) {
-    return t -> {
-      double error = targetRotations - averageDrivePosition();
-      autoIntake = intaking;
-      autoShooter = shooterOn;
-      if (Math.abs(error) < 0.25 || t >= kAutoDriveTimeout) {
-        return true;
+        //  if (!transfering && !shootTwo){
+        //   shootTwo = false;
+        //   setTransfer(false);
+        //   leftLeader.set(0.1);
+        //   rightLeader.set(0.1);
+        //   intake.set(0.4);
+        //   transferBottom.set(-1.0);
+        // }if (intakeDriveTarget > leftLeader.getPosition().getValueAsDouble()){
+        //   shootTwo = false;
+        //   setTransfer(false);
+        //   leftLeader.set(-0.1);
+        //   rightLeader.set(-0.1);
+        //   intake.set(0.0);
+        //   transferBottom.set(0.0);
+        //   transferTop.set(0.0);
+        // }else if(driveTarget > leftLeader.getPosition().getValueAsDouble()) {
+        //   shootTwo = true;
+        //   setTransfer(true);
+        //   leftLeader.set(0);
+        //   rightLeader.set(0);
+        //   intake.set(1.0);
+        //   transferBottom.set(-0.5);
+        //   transferTop.set(-0.5);
+        // }else {
+        //   shootTwo = false;
+        //   setTransfer(false);
+        //   leftLeader.set(0.0);
+        //   rightLeader.set(0.0);
+        //   intake.set(0.0);
+        // }
+      
+        if(shooterTop.getVelocity().getValueAsDouble()*60.0 < kTopSpeed-300)
+        {
+          shooterTop.setControl(topRequest.withOutput(1));
+        }
+        else if(shooterTop.getVelocity().getValueAsDouble()*60.0 < kTopSpeed)
+        {
+          shooterTop.setControl(topRequest.withOutput(0.3));
+        }
+        else
+        {
+          shooterTop.setControl(topRequest.withOutput(0));
+        }
+    
+    
+         if(shooterBottom.getVelocity().getValueAsDouble()*60.0 < kBottomSpeed-300)
+        {
+          shooterBottom.setControl(bottomRequest.withOutput(1));
+        }
+        else if(shooterBottom.getVelocity().getValueAsDouble()*60.0 < kBottomSpeed)
+        {
+          shooterBottom.setControl(bottomRequest.withOutput(0.5));
+        }
+        else
+        {
+          shooterBottom.setControl(bottomRequest.withOutput(0));
+        }
+    
       }
-      double speed = Math.copySign(kAutoDriveSpeed, error);
-      autoLeft = speed;
-      autoRight = speed;
-      return false;
-    };
-  }
-
-  /** Wait in place (everything off except the shooter if requested). */
-  @SuppressWarnings("unused")
-  private AutoStep waitSeconds(double seconds, boolean shooterOn) {
-    return t -> {
-      autoShooter = shooterOn;
-      return t >= seconds;
-    };
-  }
-
-  // ----- Auto helpers -----
-
-  private double averageDrivePosition() {
-    return (leftLeader.getPosition().getValueAsDouble()
-        + rightLeader.getPosition().getValueAsDouble()) / 2.0;
-  }
-
-  private double shooterTopRpm() {
-    return shooterTop.getVelocity().getValueAsDouble() * 60.0;
-  }
-
-  private double shooterBottomRpm() {
-    return shooterBottom.getVelocity().getValueAsDouble() * 60.0;
-  }
-
-  private boolean shooterAtSpeed() {
-    return shooterTopRpm() > kTopSpeed - 100 && shooterBottomRpm() > kBottomSpeed - 100;
-  }
-
-  /** Same bang-bang speed control the old auto used. */
-  private void runShooter(boolean on) {
-    double top = 0;
-    double bottom = 0;
-    if (on) {
-      double topRpm = shooterTopRpm();
-      if (topRpm < kTopSpeed - 300) {
-        top = 1.0;
-      } else if (topRpm < kTopSpeed) {
-        top = 0.3;
-      }
-      double bottomRpm = shooterBottomRpm();
-      if (bottomRpm < kBottomSpeed - 300) {
-        bottom = 1.0;
-      } else if (bottomRpm < kBottomSpeed) {
-        bottom = 0.5;
-      }
-    }
-    shooterTop.setControl(topRequest.withOutput(top));
-    shooterBottom.setControl(bottomRequest.withOutput(bottom));
-  }
-
-  private void applyAutoOutputs() {
-    leftLeader.setControl(leftOut.withOutput(autoLeft));
-    rightLeader.setControl(rightOut.withOutput(autoRight));
-    runShooter(autoShooter);
-
-    double intakeOut = (autoIntake || autoFeed) ? kIntakeSpeed : 0;
-    double bottomOut = (autoIntake || autoFeed) ? kTransferBottomSpeed : 0;
-    double topOut = autoFeed ? kTransferTopSpeed : 0; // top only runs when shooting
-    intake.setControl(intakeRequest.withOutput(intakeOut));
-    transferBottom.setControl(transferBottomRequest.withOutput(bottomOut));
-    transferTop.setControl(transferTopRequest.withOutput(topOut));
-  }
-
-  @Override
+    
+     
+    
+      @Override
   public void teleopInit() {
     setTransfer(false);
     driveForward(false);
@@ -371,6 +330,20 @@ public class Robot extends TimedRobot {
     transferTop.setControl(transferTopRequest.withOutput(on ? kTransferTopSpeed : 0));
   }
 
+   private void nextStep(AutoStep next) {
+    autoStep = next;
+    stepTimer.restart();
+  }
+
+  private boolean shooterAtSpeed() {
+    return shooterTop.getVelocity().getValueAsDouble() * 60.0 > kTopSpeed - 100
+        && shooterBottom.getVelocity().getValueAsDouble() * 60.0 > kBottomSpeed - 100;
+  }
+
+  private void stopDrive() {
+    leftLeader.set(0);
+    rightLeader.set(0);
+  } 
   @Override
   public void teleopPeriodic() {
     /* Get forward and rotational throttle from driver */
